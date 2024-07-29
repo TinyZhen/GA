@@ -1,4 +1,5 @@
 
+import re
 from tkinter import *
 from tkinter import ttk,filedialog,messagebox
 import pickle,os,sys,csv
@@ -18,15 +19,15 @@ class Macro:
                  ,"Final RNA Extraction Volume (ul)","CP/100 ml of Sample","Detection Limit (CP/100ml)","Marker Detected?","Droplet QC Pass"]
     DDPCR_COL = ["Sample","PCRType","TargetDetected"
                  ,"DetectedNotQuantifiable","QualityControlPassed","ControlQCPass?","DropletQCPass","DetectionLowerLimit"
-                 ,"N1GeneCopies","N2GeneCopies","EGeneCopies","Phi6GeneCopies"
+                 ,"N1GeneCopies","N2GeneCopies","EGeneCopies","Phi6GeneCopies","BCOVGeneCopies"
                  ,"Comments","SampleStartTime (HHMM 24-hr)","PCRResultDate (YYMMDD)","FlowRate (in MGD)","PMMoVGeneCopies/100ml"]
     RSV_COL = ["Sample","PCRType","RSVTargetDetected","SC2TargetDetected","NVG1TargetDetected","NVG2TargetDetected"
                ,"DetectedNotQuantifiable","QualityControlPassed","ControlQCPass?","DropletQCPass","DetectionLowerLimit"
-               ,"RSVGeneCopies","SC2GeneCopies","NVG1GeneCopies","NVG2GeneCopies","Phi6GeneCopies"
+               ,"RSVGeneCopies","SC2GeneCopies","NVG1GeneCopies","NVG2GeneCopies","Phi6GeneCopies","BCOVGeneCopies"
                ,"Comments","SampleStartTime (HHMM 24-hr)","PCRResultDate (YYMMDD)","FlowRate (in MGD)","PMMoVGeneCopies/100ml"]
 
-    RSV_LIST = ["RSV","SC2","NVG1","NVG2","Phi6"]
-    COV_LIST = ["N1","N2","Phi6"]
+    RSV_LIST = ["RSV","SC2","NVG1","NVG2","Phi6","BCOV"]
+    COV_LIST = ["N1","N2","Phi6","BCOV"]
     wb = openpyxl.Workbook()
     red_fill = PatternFill(patternType='solid', fgColor= '00FF0000')
     green_fill = PatternFill(patternType='solid', fgColor='00CCFFCC')
@@ -178,9 +179,6 @@ class Macro:
             messagebox.showerror('Error', 'Error writing output file!') 
             return 1
         
-
-        
-
     # Define a custom sort key function
     def custom_sort_key(self,sample_id):
         custom_sort_order = ["EXT", "NTC", "POS", "NEG"]
@@ -191,8 +189,11 @@ class Macro:
         else:
             rest_of_string = sample_id[len(prefix):]
             return (custom_sort_order.index(prefix), rest_of_string)
-
-
+        
+    def extract_last_six_digits(self, input_string):
+        digits = ''.join(re.findall(r'\d', input_string))
+        return digits[-6:]
+    
     def loadraw(self):
         global paths,overall_df
         replacements = {
@@ -228,9 +229,22 @@ class Macro:
             overall_df = pd.concat([overall_df,filtered_df],ignore_index=True)
         
         input_df = pd.DataFrame({"Sample": overall_df["Sample"].dropna().unique()})
-        input_df["Final Concentrate Volume (mL)"] = None
+        pd.set_option('display.max_rows', None)
+        input_df["Date"] = input_df["Sample"].apply(lambda x: self.extract_last_six_digits(x))
+        try:
+            input_df["Date"] = pd.to_datetime(input_df["Date"], format="%y%m%d")
+        except Exception as e:
+            print(f"Skipping rows where conversion to datetime failed: {e}")
+
+        # Sort DataFrame by date
+        sorted_df = input_df.sort_values(by="Date")
+        sorted_df["SortKey"] = sorted_df["Sample"].apply(self.custom_sort_key)
+        sorted_df = sorted_df.groupby("Date").apply(lambda x: x.sort_values(by="SortKey")).drop(columns=["SortKey","Date"]).reset_index(drop=True)
+
+        sorted_df["Final Concentrate Volume (mL)"] = None
+        sorted_df["Dilution Factor"] = 1
         with pd.ExcelWriter(output_excel.get(), engine='openpyxl', mode='w') as writer:
-            input_df.to_excel(writer,sheet_name="input",index=False)
+            sorted_df.to_excel(writer,sheet_name="input",index=False)
         
         self.logprint("Done import, Go to the Excel and input Concentration.")
         try:
@@ -346,6 +360,20 @@ class Macro:
 
         wb.save(output_excel.get())
 
+    def output_to_sheet(self,row,df,master_df,col_name):
+        master_id = row["Sample"]
+        if not pd.isna(master_id):
+            matching_row_df2 = df[df['Sample'].astype(str).str.contains(str(master_id))]
+            dilution = master_df.loc[master_df["Sample"]==master_id]["Dilution Factor"].iloc[0]
+        if not matching_row_df2.empty:
+    # Extract the value from the matching row in df2
+            df.loc[matching_row_df2.index,col_name] = row["CP/100 ml of Sample"] * dilution
+            df.loc[matching_row_df2.index,"DetectionLowerLimit"] = row["Detection Limit (CP/100ml)"]
+        else:
+            df.loc[len(df.index),"Sample"] = master_id
+            df.loc[len(df.index)-1, col_name] = row["CP/100 ml of Sample"] * dilution
+            df.loc[len(df.index)-1, "DetectionLowerLimit"] = row["Detection Limit (CP/100ml)"]
+
 
     def chekc_lowerlimit(self):
         try:
@@ -354,7 +382,7 @@ class Macro:
             self.logprint("cant open the file")
 
         
-        columns_to_check = ["N1GeneCopies","N2GeneCopies","RSVGeneCopies","SC2GeneCopies","NVG1GeneCopies","NVG2GeneCopies","Phi6GeneCopies"]
+        columns_to_check = ["N1GeneCopies","N2GeneCopies","RSVGeneCopies","SC2GeneCopies","NVG1GeneCopies","NVG2GeneCopies","Phi6GeneCopies","BCOVGeneCopies"]
    
         for sheet_name in ["rsv", "cov"]:
             sheet = wb[sheet_name]
@@ -434,21 +462,12 @@ class Macro:
                     col_name = "N2GeneCopies"
                 elif key == 'Phi6':
                     col_name = "Phi6GeneCopies"
+                elif key == 'BCOV':
+                    col_name = "BCOVGeneCopies"
                 elif key == 'EG':
                     col_name == "EGeneCopies"
                 for index, row in df_dict_mean[f'{key}_mean'].iterrows():   
-                    master_id = row["Sample"]
-                    if not pd.isna(master_id):
-                        matching_row_df2 = cov_result_df[cov_result_df['Sample'].astype(str).str.contains(str(master_id))]
-                    if not matching_row_df2.empty:
-                # Extract the value from the matching row in df2
-                        cov_result_df.loc[matching_row_df2.index,col_name] = row["CP/100 ml of Sample"]
-                        cov_result_df.loc[matching_row_df2.index,"DetectionLowerLimit"] = row["Detection Limit (CP/100ml)"]
-                    else:
-                        cov_result_df.loc[len(cov_result_df.index),"Sample"] = master_id
-                        cov_result_df.loc[len(cov_result_df.index)-1, col_name] = row["CP/100 ml of Sample"]
-                        cov_result_df.loc[len(cov_result_df.index)-1, "DetectionLowerLimit"] = row["Detection Limit (CP/100ml)"]
-
+                    self.output_to_sheet(row,cov_result_df,master_df,col_name)
 
             elif key in self.RSV_LIST:
                 if key == 'RSV':
@@ -457,23 +476,15 @@ class Macro:
                     col_name = "SC2GeneCopies"
                 elif key == 'Phi6':
                     col_name = "Phi6GeneCopies"
+                elif key == 'BCOV':
+                    col_name = "BCOVGeneCopies"
                 elif key == 'NVG1':
                     col_name = "NVG1GeneCopies"
                 elif key == 'NVG2':
                     col_name = "NVG2GeneCopies"
-                for index, row in df_dict_mean[f'{key}_mean'].iterrows():   
-                    master_id = row["Sample"]
-                    if not pd.isna(master_id):
-                        matching_row_df2 = rsv_result_df[rsv_result_df['Sample'].astype(str).str.contains(str(master_id))]
-                    if not matching_row_df2.empty:
-                # Extract the value from the matching row in df2
-                        rsv_result_df.loc[matching_row_df2.index,col_name] = row["CP/100 ml of Sample"]
-                        rsv_result_df.loc[matching_row_df2.index,"DetectionLowerLimit"] = row["Detection Limit (CP/100ml)"]
-                    else:
-                        rsv_result_df.loc[len(rsv_result_df.index),"Sample"] = master_id
-                        rsv_result_df.loc[len(rsv_result_df.index)-1, col_name] = row["CP/100 ml of Sample"]
-                        rsv_result_df.loc[len(rsv_result_df.index)-1, "DetectionLowerLimit"] = row["Detection Limit (CP/100ml)"]
-                    
+                for index, row in df_dict_mean[f'{key}_mean'].iterrows():
+                    self.output_to_sheet(row,rsv_result_df,master_df,col_name)
+
 
         # OUTPUT TO COMPILE RESULT FOR CoV
         cov_result_df = self.output_to_compile_sheet(cov_result_df,df_dict)

@@ -15,9 +15,9 @@ from datetime import date
 class VariantSpotterApp:
     end_date = date.today()
     start_date = end_date - relativedelta(months=6)
-    base_url = 'https://lapis.cov-spectrum.org/open/v1/sample/' 
+    base_url = 'https://lapis.cov-spectrum.org/open/v2/sample/' 
     mutation_url = None
-    lineage_url = 'aa-mutations?pangoLineage='
+    lineage_url = 'aminoAcidMutations?pangoLineage='
     format_fild = '&dataFormat=csv'
     search_words = ['Sequences','Unique Sequence']
     workbook = None
@@ -88,7 +88,7 @@ class VariantSpotterApp:
         ttk.Button(buttonrow2, text="Run", command=self.result).pack(side=LEFT, padx=15)
         ttk.Button(buttonrow2, text="Clear", command=self.clear).pack(side=LEFT, padx=15)
         ttk.Button(buttonrow2, text="Close", command=self.close).pack(side=LEFT, padx=15)
-        buttonrow2.pack(side=BOTTOM, pady=5)
+        buttonrow2.pack(side=LEFT)
 
         self.log = Text(height=20, width=50)
         self.log.pack(side=RIGHT, padx=10, pady=10)
@@ -173,54 +173,58 @@ class VariantSpotterApp:
                 csv_data = response.text
                 
                 # Use StringIO to convert the CSV data into a file-like object
-                csv_file = StringIO(csv_data)
-                
-                # Create a CSV reader and iterate through the rows
-                lineage_df = pd.read_csv(csv_file)
-                if(region.get()):
-                    selected_region = region.get()
-                    lineage_df = lineage_df[lineage_df['region'] == selected_region]
-                if not lineage_df.empty:
-                    lineage_sorted_df = lineage_df.sort_values(by='count', ascending=False)
-                    total_count2 = lineage_df['count'].sum()
-                    lineage_sorted_df['Abundance'] = lineage_sorted_df['count']/total_count2
-                    matchstr = ""
-                    mismatch_dic = {}
-                    for index, rows in lineage_sorted_df.iterrows():
-                        # only checking the abundance of lineage that is greater than 5%
-                        if str(rows['pangoLineage']).strip().lower() != 'nan':
-                            if rows['count'] > int(threshold.get()):
+                if csv_data: 
+                    csv_file = StringIO(csv_data)
+                    
+                    # Create a CSV reader and iterate through the rows
+                    lineage_df = pd.read_csv(csv_file)
+                    if(region.get()):
+                        selected_region = region.get()
+                        lineage_df = lineage_df[lineage_df['region'] == selected_region]
+                    if not lineage_df.empty:
+                        lineage_sorted_df = lineage_df.sort_values(by='count', ascending=False)
+                        total_count2 = lineage_df['count'].sum()
+                        lineage_sorted_df['Abundance'] = lineage_sorted_df['count']/total_count2
+                        matchstr = ""
+                        mismatch_dic = {}
+                        for index, rows in lineage_sorted_df.iterrows():
+                            # only checking the abundance of lineage that is greater than 5%
+                            if str(rows['pangoLineage']).strip().lower() != 'nan':
+                                if rows['count'] > int(threshold.get()):
 
-                                api = self.generateURL(rows['pangoLineage'],self.lineage_url,self.format_fild)
-                                # print(rows['pangoLineage'])
-                                response = self.API_call(api)
-                                if response.status_code == 200:
-                                    # Parse the CSV data from the response content
-                                    csv_data = response.text
-                                    
-                                    # Use StringIO to convert the CSV data into a file-like object
-                                    csv_file = StringIO(csv_data)
-                                    
-                                    # Create a CSV reader and iterate through the rows
-                                    mutation_df = pd.read_csv(csv_file)
-                                    result_list = self.check_mutation(aamutation_list,mutation_df)
-                                if(not result_list):
-                                    # print(f'Sequence:{indexs+1} {rows["pangoLineage"]} Percentage:{count/total_count*100:.1f}')
-                                    matchstr = f'{rows["pangoLineage"]}/{matchstr}'
-                                else:
-                                    # print(f'Sequence:{indexs+1} Possible lineage: {rows["pangoLineage"]} Percentatge:{count/total_count*100:.1f}')
-                                    mismatch_dic[rows["pangoLineage"]] = result_list
-                    if matchstr:
-                        self.update_excel(matchstr,count/total_count*100,'G',counter)
+                                    api = self.generateURL(rows['pangoLineage'],self.lineage_url,self.format_fild)
+                                    # print(rows['pangoLineage'])
+                                    response = self.API_call(api)
+                                    if response.status_code == 200:
+                                        # Parse the CSV data from the response content
+                                        csv_data = response.text
+                                        
+                                        # Use StringIO to convert the CSV data into a file-like object
+                                        csv_file = StringIO(csv_data)
+                                        
+                                        # Create a CSV reader and iterate through the rows
+                                        mutation_df = pd.read_csv(csv_file)
+                                        result_list = self.check_mutation(aamutation_list,mutation_df)
+                                    if(not result_list):
+                                        # print(f'Sequence:{indexs+1} {rows["pangoLineage"]} Percentage:{count/total_count*100:.1f}')
+                                        matchstr = f'{rows["pangoLineage"]}/{matchstr}'
+                                    else:
+                                        # print(f'Sequence:{indexs+1} Possible lineage: {rows["pangoLineage"]} Percentatge:{count/total_count*100:.1f}')
+                                        mismatch_dic[rows["pangoLineage"]] = result_list
+                        if matchstr:
+                            self.update_excel(matchstr,count/total_count*100,'G',counter)
+                        else:
+                            self.update_excel("Other",count/total_count*100,'H',counter)
+
+                            if mismatch_dic:
+                                self.update_excel(mismatch_dic,counter)
                     else:
+                        # print('not found')
+                        # print(f'Sequence:{indexs+1} {sequence} Percentatge:{count/total_count*100:.1f}')
                         self.update_excel("Other",count/total_count*100,'H',counter)
-
-                        if mismatch_dic:
-                            self.update_excel(mismatch_dic,counter)
                 else:
-                    # print('not found')
-                    # print(f'Sequence:{indexs+1} {sequence} Percentatge:{count/total_count*100:.1f}')
-                    self.update_excel("Other",count/total_count*100,'H',counter)                
+                    self.update_excel("Other",count/total_count*100,'H',counter)
+                
             else:
                 # print('not found')
                 # print(f'Sequence:{indexs+1} {sequence} Percentatge:{count/total_count*100:.1f}')
@@ -397,7 +401,7 @@ class VariantSpotterApp:
         if region.get():
             region_link = f',region'
 
-        mutation_url = f'aggregated?&dateFrom={self.start_date}&dateTo={self.end_date}&fields=pangoLineage{region_link}{country_link}{division_link}&aaMutations='
+        mutation_url = f'aggregated?&dateFrom={self.start_date}&dateTo={self.end_date}&fields=pangoLineage{region_link}{country_link}{division_link}&aminoAcidMutations='
         inpath = Path(raw_input.get())
         counter = 2
         self.logprint("Adding data to file...")
