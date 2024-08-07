@@ -23,8 +23,8 @@ class PMMoVCalc:
                 "y-int": 39.1,
                 "efficiency": 0.9454
                 }
-    machine2 = { "slop": -3.39,
-                "y-int": 36.5,
+    machine2 = { "slop": -3.38,
+                "y-int": 38.4,
                 "efficiency": 0.9724
                 }
     wb = openpyxl.Workbook()
