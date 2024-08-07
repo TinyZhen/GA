@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 import openpyxl
 from openpyxl.styles import PatternFill
-import xlsxwriter
+# import xlsxwriter
 import os
 import math
 from numbers import Number
@@ -489,8 +489,17 @@ class Macro:
         # OUTPUT TO COMPILE RESULT FOR CoV
         cov_result_df = self.output_to_compile_sheet(cov_result_df,df_dict)
         rsv_result_df = self.output_to_compile_sheet(rsv_result_df,df_dict)
-        # print(rsv_result_df.head)
 
+        # print(rsv_result_df.head)
+        replacements = {
+                ' ': '_',
+                'POS': 'POS_Control',
+                'NTC': 'NT_Control',
+                'EXT': 'EXT_Control',
+                
+            }
+        for key, value in replacements.items():
+                rsv_result_df['Sample'] = rsv_result_df['Sample'].str.replace(key, value)
             # Iterate through the df_dict and write each DataFrame to a new sheet
         with pd.ExcelWriter(output_excel.get(), engine='openpyxl', mode='a') as writer:
             cov_result_df.to_excel(writer,sheet_name="cov",index=False)
