@@ -120,7 +120,7 @@ def findneg(df,wb,sheet):
 def checkcal(df,wb,sheet):
     for row, value in enumerate(df[search_word],start=2):
         if isinstance(value, str) and len(value) > 0:
-            if value.startswith("Cal"):
+            if value.startswith("CAL"):
                 ct_mean = df.loc[row - 2, 'Ct Mean']
                 if ct_mean < 27 or ct_mean > 28.5 :
                     cell = sheet.cell(row,column=2)

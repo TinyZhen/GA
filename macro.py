@@ -367,11 +367,11 @@ class Macro:
             dilution = master_df.loc[master_df["Sample"]==master_id]["Dilution Factor"].iloc[0]
         if not matching_row_df2.empty:
     # Extract the value from the matching row in df2
-            df.loc[matching_row_df2.index,col_name] = row["CP/100 ml of Sample"] * dilution
+            df.loc[matching_row_df2.index,col_name] = row["CP/100 ml of Sample"]
             df.loc[matching_row_df2.index,"DetectionLowerLimit"] = row["Detection Limit (CP/100ml)"]
         else:
             df.loc[len(df.index),"Sample"] = master_id
-            df.loc[len(df.index)-1, col_name] = row["CP/100 ml of Sample"] * dilution
+            df.loc[len(df.index)-1, col_name] = row["CP/100 ml of Sample"]
             df.loc[len(df.index)-1, "DetectionLowerLimit"] = row["Detection Limit (CP/100ml)"]
 
 
@@ -442,11 +442,36 @@ class Macro:
             df_dict[key]["Final RNA Extraction Volume (ul)"] = 80
             df_dict[key]["Detection Limit (CP/100ml)"] = (0.6 * df_dict[key]['Final RNA Extraction Volume (ul)']) \
                 * ((df_dict[key]['Final Concentrate Volume (mL)'] / df_dict[key]['Volume used for Extraction (ml)']) / df_dict[key]['Initial Volume analyzed (mL)']) * 100
-            df_dict[key]["CP/100 ml of Sample"] = np.where(df_dict[key]['Positives'] >= 3, \
-                (((df_dict[key]['CP/ul'] * df_dict[key]['Final RNA Extraction Volume (ul)']) * \
-                (df_dict[key]['Final Concentrate Volume (mL)'] / df_dict[key]['Volume used for Extraction (ml)'])) / df_dict[key]['Initial Volume analyzed (mL)']) * 100, df_dict[key]['Detection Limit (CP/100ml)'])
-            df_dict[key]["Marker Detected?"] = np.where((df_dict[key]['Accepted Droplets'] >= 8000) & (df_dict[key]['Positives'] >= 3), 1, 0)
-            df_dict[key]["Droplet QC Pass"] = np.where(df_dict[key]['Accepted Droplets']>=8000,1,0)
+            #TODO take the mean of Postives
+            for sample, group in df_dict[key].groupby('Sample'):
+                # Calculate the mean of 'Positives' for this sample group
+                mean_positives = group['Positives'].mean()
+                dilution = master_df.loc[master_df["Sample"]==sample]["Dilution Factor"].iloc[0]
+
+                # Iterate through each row in the group
+                for index, row in group.iterrows():
+                    # Apply the mean value of 'CP/ul' if 'Positives' for the group is > 3
+                    if mean_positives > 3:
+                        df_dict[key].loc[index, "CP/100 ml of Sample"] = (((row['CP/ul'] * row['Final RNA Extraction Volume (ul)']) *
+                            (row['Final Concentrate Volume (mL)'] / row['Volume used for Extraction (ml)'])) /
+                            row['Initial Volume analyzed (mL)']) * 100 * dilution
+                    else:
+                        # Use detection limit if mean of positives is <= 3
+                        df_dict[key].loc[index, "CP/100 ml of Sample"] = row['Detection Limit (CP/100ml)']
+
+                    # Calculate "Marker Detected?" conditionally within the loop
+                    if (row['Accepted Droplets'] >= 8000) and (mean_positives > 3):
+                        df_dict[key].loc[index, "Marker Detected?"] = 1
+                    else:
+                        df_dict[key].loc[index, "Marker Detected?"] = 0
+
+            # df_dict[key]["CP/100 ml of Sample"] = np.where(df_dict[key]['Positives'] > 3, \
+            #     (((df_dict[key]['CP/ul'] * df_dict[key]['Final RNA Extraction Volume (ul)']) * \
+            #     (df_dict[key]['Final Concentrate Volume (mL)'] / df_dict[key]['Volume used for Extraction (ml)'])) / df_dict[key]['Initial Volume analyzed (mL)']) * 100, df_dict[key]['Detection Limit (CP/100ml)'])
+            #TODO take the mean of Postives
+            # df_dict[key]["Marker Detected?"] = np.where((df_dict[key]['Accepted Droplets'] >= 8000) & (df_dict[key]['Positives'] > 3), 1, 0)
+            df_dict[key]["Droplet QC Pass"] = np.where(df_dict[key]['Accepted Droplets'] >= 8000,1,0)
+#TODO check the dilution facter only applies when postive is greater than 3.
 
             # print(df_dict[key]["Final Concentrate Volume (mL)"])
             result = df_dict[key].groupby('Sample')[['CP/100 ml of Sample', 'Detection Limit (CP/100ml)']].mean().reset_index()
